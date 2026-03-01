@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>日本全国スタンプラリー</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: "Helvetica Neue", Arial, sans-serif; background: #f0f2f5; color: #333; overflow: hidden; }
+        .page { display: none; height: calc(100vh - 60px); overflow-y: auto; width: 100vw; -webkit-overflow-scrolling: touch; }
+        .page.active { display: block; }
+
+        /* --- 認証画面 --- */
+        #login-screen { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: linear-gradient(135deg, #74ebd5 0%, #9face6 100%); z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; }
+        .login-box { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 100%; max-width: 350px; text-align: center; }
+        .login-input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
+        .login-btn { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .toggle-btn { background: none; border: none; color: #007bff; cursor: pointer; text-decoration: underline; margin-top: 10px; font-size: 12px; }
+        .reset-btn { display: block; margin: 10px auto 0; background: none; border: none; color: #666; cursor: pointer; text-decoration: underline; font-size: 11px; }
+
+        /* --- マップ --- */
+        #map { height: 100%; width: 100%; background: #e5e3df; }
+        #info { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(255, 255, 255, 0.95); padding: 8px 16px; border-radius: 30px; font-weight: bold; box-shadow: 0 2px 10px rgba(0,0,0,0.2); font-size: 11px; pointer-events: none; }
+        .current-loc-btn { position: absolute; bottom: 90px; right: 20px; z-index: 1000; background: white; width: 50px; height: 50px; border-radius: 50%; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-size: 24px; }
+        .logout-btn { position: absolute; top: 10px; left: 10px; z-index: 1000; background: rgba(255, 255, 255, 0.9); padding: 8px 12px; border-radius: 8px; font-size: 12px; font-weight: bold; color: #ff5722; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2); border: 1px solid #eee; }
+
+        /* チェックインボタン */
+        #checkin-area { display: none; position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 2000; text-align: center; width: 100%; pointer-events: none; }
+        #checkin-btn { pointer-events: auto; padding: 15px 40px; background: #ff5722; color: white; border: none; border-radius: 50px; font-weight: bold; font-size: 18px; box-shadow: 0 4px 15px rgba(255, 87, 34, 0.5); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+
+        /* --- コンテンツ --- */
+        .content-container { padding: 15px; padding-bottom: 80px; }
+        .section-title { text-align: center; margin: 10px 0 20px 0; font-size: 20px; }
+
+        /* スタンプ帳 */
+        .region-section { margin-bottom: 25px; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .region-title { font-size: 17px; font-weight: bold; color: #fff; background: #007bff; padding: 8px 12px; border-radius: 5px; margin-bottom: 10px; }
+        .pref-title { font-size: 13px; font-weight: bold; color: #555; border-left: 4px solid #e67e22; padding-left: 8px; margin: 12px 0 8px 0; }
+        .stamp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .stamp-card { background: #fff; border-radius: 8px; padding: 8px 4px; text-align: center; border: 1px solid #eee; filter: grayscale(100%); opacity: 0.5; }
+        .stamp-card.collected { filter: grayscale(0%); opacity: 1; border: 2px solid #ffcc00; background: #fffdf5; }
+        .stamp-icon-img { width: 32px; height: 32px; object-fit: contain; }
+        .stamp-name { font-size: 8px; font-weight: bold; margin-top: 4px; line-height: 1.2; }
+
+        /* ミッション詳細 */
+        .mission-category-title { font-size: 14px; color: #fff; background: #444; padding: 6px 12px; border-radius: 4px; margin: 20px 0 10px 0; font-weight: bold; }
+        .mission-card { background: white; border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #ccc; position: relative; }
+        .mission-card.completed { border-left: 5px solid #ffcc00; background: #fffdf0; }
+        .mission-header { display: flex; justify-content: space-between; font-size: 15px; font-weight: bold; margin-bottom: 5px; }
+        .mission-bonus { color: #ff5722; font-size: 12px; }
+        .mission-targets { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; border-top: 1px dashed #eee; padding-top: 10px; }
+        .target-tag { font-size: 10px; background: #f0f0f0; padding: 2px 8px; border-radius: 10px; color: #888; }
+        .target-tag.done { background: #d4edda; color: #155724; font-weight: bold; }
+        .progress-container { background: #eee; border-radius: 4px; height: 8px; width: 100%; overflow: hidden; margin-top: 10px; }
+        .progress-bar { height: 100%; background: #28a745; width: 0%; transition: width 0.5s; }
+        .completed-stamp { position: absolute; top: 5px; right: 5px; color: #ffcc00; font-weight: bold; font-size: 10px; border: 2px solid; padding: 2px 5px; transform: rotate(-10deg); display: none; background: white; z-index: 1; }
+        .mission-card.completed .completed-stamp { display: block; }
+
+        /* ランキング */
+        .rank-tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        .rank-tab { padding: 8px 20px; border: 1px solid #007bff; border-radius: 20px; color: #007bff; cursor: pointer; font-size: 12px; font-weight: bold; }
+        .rank-tab.active { background: #007bff; color: white; }
+        #ranking-table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        #ranking-table th { background: #f8f9fa; color: #888; font-size: 12px; padding: 12px; text-align: left; }
+        #ranking-table td { padding: 12px; border-bottom: 1px solid #eee; font-size: 14px; }
+        .rank-pt { color: #e67e22; font-weight: bold; }
+        .edit-name-btn { font-size: 10px; color: #007bff; cursor: pointer; text-decoration: underline; margin-left: 10px; }
+
+        /* メニュー */
+        .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; height: 60px; background: white; display: flex; justify-content: space-around; align-items: center; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); z-index: 9999; }
+        .nav-item { text-align: center; flex: 1; color: #999; font-size: 18px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+        .nav-item.active { color: #007bff; }
+        .nav-text { font-size: 9px; font-weight: bold; display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen">
+        <div class="login-box">
+            <h2 style="margin-top:0;">🇯🇵 全国ラリー</h2>
+            <input type="email" id="email" class="login-input" placeholder="メールアドレス">
+            <input type="password" id="password" class="login-input" placeholder="パスワード">
+            <div id="nickname-field" style="display:none;"><input type="text" id="signup-nickname" class="login-input" placeholder="ニックネーム"></div>
+            <button class="login-btn" id="auth-action-btn" onclick="handleLogin()">ログイン</button>
+            <button class="toggle-btn" id="toggle-auth-btn" onclick="toggleAuthMode()">新規登録はこちら</button>
+            <button class="reset-btn" onclick="handleResetPassword()">パスワードをお忘れの方はこちら</button>
+            <div id="auth-msg" style="color:red; margin-top:10px; font-size:12px; min-height:15px;"></div>
+        </div>
+    </div>
+
+    <div id="app-content" style="display:none;">
+        <div id="page-map" class="page active">
+            <div id="info">現在地を取得中...</div>
+            <div class="logout-btn" onclick="handleLogout()">🚪 ログアウト</div>
+            <div id="map"></div>
+            <div class="current-loc-btn" onclick="flyToCurrentLocation()">◎</div>
+            <div id="checkin-area"><button id="checkin-btn" onclick="executeCheckIn()">📍 スタンプを押す！</button></div>
+        </div>
+
+        <div id="page-stamps" class="page"><div class="content-container"><h2 class="section-title">✨ スタンプ帳</h2><div id="stamp-book-container"></div></div></div>
+        <div id="page-missions" class="page"><div class="content-container"><h2 class="section-title">🔥 ミッション一覧</h2><div id="mission-container"></div></div></div>
+        <div id="page-ranking" class="page">
+            <div class="content-container">
+                <h2 class="section-title">🏆 全国ランキング</h2>
+                <div style="text-align:center; margin-bottom:15px; background:white; padding:15px; border-radius:10px;">
+                    <b id="display-nickname">ゲスト</b><span class="edit-name-btn" onclick="changeNickname()">変更</span><br>
+                    <span style="font-size:12px; color:#666;">累計: <span id="score-total">0</span> pt / 今月: <span id="score-month">0</span> pt</span>
+                    <br><button onclick="saveScore(true)" style="margin-top:10px; padding:6px 16px; background:#28a745; color:white; border:none; border-radius:5px; font-weight:bold;">スコアを送信</button>
+                </div>
+                <div class="rank-tabs">
+                    <div class="rank-tab active" id="tab-total" onclick="switchRanking('total')">全期間</div>
+                    <div class="rank-tab" id="tab-month" onclick="switchRanking('month')">今月</div>
+                </div>
+                <table id="ranking-table"><thead><tr><th>順位</th><th>名前</th><th style="text-align:right;">ポイント</th></tr></thead><tbody id="ranking-body"></tbody></table>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-item active" onclick="switchPage('map')">🗺️<span class="nav-text">マップ</span></div>
+            <div class="nav-item" onclick="switchPage('stamps')">✨<span class="nav-text">スタンプ</span></div>
+            <div class="nav-item" onclick="switchPage('missions')">🔥<span class="nav-text">ミッション</span></div>
+            <div class="nav-item" onclick="switchPage('ranking')">🏆<span class="nav-text">順位</span></div>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://jiwgmmikiolghqaixspq.supabase.co'; 
+        const SUPABASE_KEY = 'sb_publishable_Dcghh3gGDIosZzICZEOKdg_RiqTLi7R'; 
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let isSignupMode = false, currentUser = null;
+
+        // --- 認証状態の監視 (再設定リンク対応) ---
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+            if (event === "SIGNED_IN") {
+                currentUser = session.user;
+                showApp();
+            }
+            if (event === "PASSWORD_RECOVERY") {
+                const newPassword = prompt("新しいパスワードを入力してください");
+                if (newPassword) {
+                    const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+                    if (error) alert("更新失敗: " + error.message);
+                    else alert("パスワードを正常に更新しました！");
+                }
+            }
+        });
+
+        window.onload = async () => {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) { currentUser = session.user; showApp(); }
+        };
+
+        function toggleAuthMode() { isSignupMode = !isSignupMode; document.getElementById('nickname-field').style.display = isSignupMode ? 'block' : 'none'; document.getElementById('auth-action-btn').innerText = isSignupMode ? '登録' : 'ログイン'; document.getElementById('auth-msg').innerText = ""; }
+
+        async function handleLogin() {
+            const email = document.getElementById('email').value, password = document.getElementById('password').value;
+            const msg = document.getElementById('auth-msg');
+            msg.innerText = "処理中...";
+            if (isSignupMode) {
+                const nickname = document.getElementById('signup-nickname').value.trim();
+                if (!nickname) { msg.innerText = "ニックネームを入力してください"; return; }
+                const { data: existing } = await supabaseClient.from('rankings').select('nickname').eq('nickname', nickname);
+                if (existing && existing.length > 0) { msg.innerText = "そのニックネームは既に使われています"; return; }
+                const { data, error } = await supabaseClient.auth.signUp({ email, password, options: { data: { nickname } } });
+                if (error) msg.innerText = error.message; 
+                else { msg.innerText = "確認メールを送信しました（もしあれば）"; }
+            } else {
+                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (error) msg.innerText = error.message; 
+            }
+        }
+
+        // --- ★ パスワード再設定メール送信 ---
+        async function handleResetPassword() {
+            const email = document.getElementById('email').value.trim();
+            if (!email) return alert("メールアドレスを入力してください");
+            const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+                redirectTo: window.location.href,
+            });
+            if (error) alert("エラー: " + error.message);
+            else alert("パスワード再設定用のメールを送信しました。メール内のリンクをクリックしてください。");
+        }
+
+        async function changeNickname() {
+            const oldName = currentUser?.user_metadata?.nickname;
+            const newName = prompt("新しいニックネームを入力してください", oldName);
+            if (!newName || newName.trim() === "" || newName === oldName) return;
+            const cleanName = newName.trim();
+            const { data: existing } = await supabaseClient.from('rankings').select('nickname').eq('nickname', cleanName);
+            if (existing && existing.length > 0) return alert("その名前は既に使われています。");
+            const { data, error: authError } = await supabaseClient.auth.updateUser({ data: { nickname: cleanName } });
+            if (authError) return alert("変更失敗: " + authError.message);
+            if (oldName) { await supabaseClient.from('rankings').delete().eq('nickname', oldName); }
+            currentUser = data.user;
+            document.getElementById('display-nickname').innerText = cleanName;
+            await saveScore(false); 
+            alert("ニックネームを変更しました！ランキングも更新されました。");
+            fetchRanking(); 
+        }
+
+        async function handleLogout() { 
+            const confirmLogout = confirm("ログアウトしてもよろしいですか？");
+            if (confirmLogout) { await supabaseClient.auth.signOut(); location.reload(); }
+        }
+
+        function showApp() { 
+            document.getElementById('login-screen').style.display = 'none'; 
+            document.getElementById('app-content').style.display = 'block'; 
+            document.getElementById('display-nickname').innerText = currentUser?.user_metadata?.nickname || "ゲスト"; 
+            setTimeout(() => { map.invalidateSize(); }, 200);
+            updateStampBook(); 
+            fetchRanking(); 
+        }
+
+        const map = L.map('map').setView([36.5, 138.0], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const commonIconConfigs = { iconSize: [32, 32], iconAnchor: [16, 32], popupAnchor: [0, -32] };
+        const icons = {
+            castle: L.icon({ iconUrl: 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhcDXuAfjU7L1Swiq2-k6cIhNxnkdfrLcUQnkzB-Hd-Jz-fkG6jjGjCEzvcKTqNSUtgUGoC2MlqGvWoMjIkv1qJt4ALMc7TCSjHdXJ4yeIa90XEiLv4OJqsqfVMvHq2Mo8hLVoBIEUkkvFw/s800/landmark_oosakajou.png', ...commonIconConfigs }),
+            shrine: L.icon({ iconUrl: 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiNiH39_fhZhuVwWRJdgjIiOGOYibDQTQJwGrXFZZ1geQNQEZhBy_y8G6mjMPxoAt4zezPZezlaayQyiYv32mtc-XD8xCTwe45ypQhNrczkgMc06WxHN4gnAS51SLL369ne-Myk3wLzqNY/s800/building_tera.png', ...commonIconConfigs }),
+            landmark: L.icon({ iconUrl: 'https://cdn-icons-png.flaticon.com/512/3177/3177361.png', ...commonIconConfigs }),
+            onsen: L.icon({ iconUrl: 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEighClVza9k0s0XqZYb56j5mWotcHJqu4WaIB7TJri-4CS1gLwTNA2uosrYOnzbefjS_8WTBGgJUfkk_rnq_XjeuvZ4rr6QVffPTIRaWtXGLgN4hRE_WibLzEGFcCPRMFzEGqCIXM0ZGK1a/s1600/mark_onsen.png', ...commonIconConfigs }),
+            other: L.icon({ iconUrl: 'https://cdn-icons-png.flaticon.com/512/1077/1077114.png', ...commonIconConfigs })
+        };
+
+        const spots = [
+            { name: "札幌時計台", lat: 43.062, lng: 141.353, pt: 30, type: 'landmark', region: '北海道・東北', pref: '北海道' },
+            { name: "五稜郭", lat: 41.796, lng: 140.756, pt: 50, type: 'castle', region: '北海道・東北', pref: '北海道', tags: ['castle'] },
+            { name: "小樽運河", lat: 43.197, lng: 140.993, pt: 30, type: 'landmark', region: '北海道・東北', pref: '北海道' },
+            { name: "中尊寺金色堂", lat: 39.001, lng: 141.103, pt: 50, type: 'shrine', region: '北海道・東北', pref: '岩手県', tags: ['shrine'] },
+            { name: "松島", lat: 38.371, lng: 141.059, pt: 50, type: 'landmark', region: '北海道・東北', pref: '宮城県', tags: ['sankei'] },
+            { name: "山寺(立石寺)", lat: 38.312, lng: 140.437, pt: 40, type: 'shrine', region: '北海道・東北', pref: '山形県', tags: ['shrine'] },
+            { name: "銀山温泉", lat: 38.570, lng: 140.530, pt: 50, type: 'onsen', region: '北海道・東北', pref: '山形県', tags: ['onsen'] },
+            { name: "弘前城", lat: 40.608, lng: 140.463, pt: 40, type: 'castle', region: '北海道・東北', pref: '青森県', tags: ['castle'] },
+            { name: "十和田湖", lat: 40.457, lng: 140.880, pt: 30, type: 'landmark', region: '北海道・東北', pref: '青森県' },
+            { name: "会津若松城", lat: 37.487, lng: 139.929, pt: 40, type: 'castle', region: '北海道・東北', pref: '福島県', tags: ['castle'] },
+            { name: "東京タワー", lat: 35.658, lng: 139.745, pt: 30, type: 'landmark', region: '関東', pref: '東京都' },
+            { name: "浅草寺", lat: 35.714, lng: 139.796, pt: 20, type: 'shrine', region: '関東', pref: '東京都', tags: ['shrine'] },
+            { name: "東京スカイツリー", lat: 35.710, lng: 139.810, pt: 50, type: 'landmark', region: '関東', pref: '東京都' },
+            { name: "日光東照宮", lat: 36.758, lng: 139.598, pt: 50, type: 'shrine', region: '関東', pref: '栃木県', tags: ['shrine'] },
+            { name: "草津温泉", lat: 36.623, lng: 138.596, pt: 40, type: 'onsen', region: '関東', pref: '群馬県', tags: ['meisen', 'onsen'] },
+            { name: "鎌倉大仏", lat: 35.316, lng: 139.535, pt: 30, type: 'shrine', region: '関東', pref: '神奈川県', tags: ['shrine'] },
+            { name: "箱根温泉", lat: 35.232, lng: 139.103, pt: 40, type: 'onsen', region: '関東', pref: '神奈川県', tags: ['onsen'] },
+            { name: "横浜中華街", lat: 35.443, lng: 139.645, pt: 20, type: 'landmark', region: '関東', pref: '神奈川県' },
+            { name: "偕楽園", lat: 36.375, lng: 140.453, pt: 30, type: 'landmark', region: '関東', pref: '茨城県' },
+            { name: "成田山新勝寺", lat: 35.786, lng: 140.318, pt: 30, type: 'shrine', region: '関東', pref: '千葉県', tags: ['shrine'] },
+            { name: "富士山頂", lat: 35.360, lng: 138.727, pt: 100, type: 'landmark', region: '中部', pref: '静岡県' },
+            { name: "名古屋城", lat: 35.184, lng: 136.900, pt: 40, type: 'castle', region: '中部', pref: '愛知県', tags: ['meijo', 'castle'] },
+            { name: "下呂温泉", lat: 35.806, lng: 137.240, pt: 40, type: 'onsen', region: '中部', pref: '岐阜県', tags: ['meisen', 'onsen'] },
+            { name: "白川郷", lat: 36.256, lng: 136.906, pt: 50, type: 'landmark', region: '中部', pref: '岐阜県' },
+            { name: "兼六園", lat: 36.562, lng: 136.662, pt: 40, type: 'landmark', region: '中部', pref: '石川県' },
+            { name: "善光寺", lat: 36.661, lng: 138.187, pt: 30, type: 'shrine', region: '中部', pref: '長野県', tags: ['shrine'] },
+            { name: "松本城", lat: 36.238, lng: 137.968, pt: 50, type: 'castle', region: '中部', pref: '長野県', tags: ['castle'] },
+            { name: "地獄谷野猿公苑", lat: 36.732, lng: 138.462, pt: 40, type: 'other', region: '中部', pref: '長野県' },
+            { name: "伊勢神宮", lat: 34.455, lng: 136.725, pt: 100, type: 'shrine', region: '中部', pref: '三重県', tags: ['shrine'] },
+            { name: "熱海温泉", lat: 35.096, lng: 139.071, pt: 30, type: 'onsen', region: '中部', pref: '静岡県', tags: ['onsen'] },
+            { name: "道頓堀", lat: 34.669, lng: 135.501, pt: 10, type: 'landmark', region: '近畿', pref: '大阪府' },
+            { name: "大阪城", lat: 34.687, lng: 135.526, pt: 20, type: 'castle', region: '近畿', pref: '大阪府', tags: ['castle'] },
+            { name: "清水寺", lat: 34.9948, lng: 135.7838, pt: 20, type: 'shrine', region: '近畿', pref: '京都府', tags: ['shrine'] },
+            { name: "天橋立", lat: 35.5695, lng: 135.1917, pt: 50, type: 'landmark', region: '近畿', pref: '京都府', tags: ['sankei'] },
+            { name: "金閣寺", lat: 35.039, lng: 135.729, pt: 30, type: 'shrine', region: '近畿', pref: '京都府', tags: ['shrine'] },
+            { name: "姫路城", lat: 34.8394, lng: 134.6939, pt: 50, type: 'castle', region: '近畿', pref: '兵庫県', tags: ['meijo', 'castle'] },
+            { name: "有馬温泉", lat: 34.7968, lng: 135.2477, pt: 40, type: 'onsen', region: '近畿', pref: '兵庫県', tags: ['meisen', 'onsen'] },
+            { name: "神戸ポートタワー", lat: 34.682, lng: 135.186, pt: 20, type: 'landmark', region: '近畿', pref: '兵庫県' },
+            { name: "東大寺", lat: 34.688, lng: 135.839, pt: 20, type: 'shrine', region: '近畿', pref: '奈良県', tags: ['shrine'] },
+            { name: "高野山", lat: 34.212, lng: 135.586, pt: 50, type: 'shrine', region: '近畿', pref: '和歌山県', tags: ['shrine'] },
+            { name: "厳島神社", lat: 34.296, lng: 132.319, pt: 50, type: 'shrine', region: '中国・四国', pref: '広島県', tags: ['sankei', 'shrine'] },
+            { name: "原爆ドーム", lat: 34.394, lng: 132.453, pt: 40, type: 'landmark', region: '中国・四国', pref: '広島県' },
+            { name: "出雲大社", lat: 35.401, lng: 132.685, pt: 50, type: 'shrine', region: '中国・四国', pref: '島根県', tags: ['shrine'] },
+            { name: "松江城", lat: 35.475, lng: 133.050, pt: 40, type: 'castle', region: '中国・四国', pref: '島根県', tags: ['castle'] },
+            { name: "鳥取砂丘", lat: 35.540, lng: 134.230, pt: 40, type: 'landmark', region: '中国・四国', pref: '鳥取県' },
+            { name: "倉敷美観地区", lat: 34.595, lng: 133.771, pt: 30, type: 'landmark', region: '中国・四国', pref: '岡山県' },
+            { name: "道後温泉", lat: 33.849, lng: 132.786, pt: 50, type: 'onsen', region: '中国・四国', pref: '愛媛県', tags: ['onsen'] },
+            { name: "栗林公園", lat: 34.330, lng: 134.044, pt: 30, type: 'landmark', region: '中国・四国', pref: '香川県' },
+            { name: "鳴門の渦潮", lat: 34.238, lng: 134.643, pt: 40, type: 'landmark', region: '中国・四国', pref: '徳島県' },
+            { name: "高知城", lat: 33.560, lng: 133.531, pt: 40, type: 'castle', region: '中国・四国', pref: '高知県', tags: ['castle'] },
+            { name: "熊本城", lat: 32.806, lng: 130.705, pt: 40, type: 'castle', region: '九州・沖縄', pref: '熊本県', tags: ['meijo', 'castle'] },
+            { name: "首里城", lat: 26.217, lng: 127.719, pt: 30, type: 'castle', region: '九州・沖縄', pref: '沖縄県', tags: ['castle'] },
+            { name: "太宰府天満宮", lat: 33.521, lng: 130.534, pt: 30, type: 'shrine', region: '九州・沖縄', pref: '福岡県', tags: ['shrine'] },
+            { name: "別府温泉", lat: 33.284, lng: 131.491, pt: 40, type: 'onsen', region: '九州・沖縄', pref: '大分県', tags: ['onsen'] },
+            { name: "桜島", lat: 31.593, lng: 130.657, pt: 50, type: 'landmark', region: '九州・沖縄', pref: '鹿児島県' },
+            { name: "屋久島", lat: 30.344, lng: 130.512, pt: 100, type: 'landmark', region: '九州・沖縄', pref: '鹿児島県' },
+            { name: "高千穂峡", lat: 32.712, lng: 131.300, pt: 50, type: 'landmark', region: '九州・沖縄', pref: '宮崎県' },
+            { name: "ハウステンボス", lat: 33.086, lng: 129.790, pt: 40, type: 'other', region: '九州・沖縄', pref: '長崎県' },
+            { name: "軍艦島", lat: 32.627, lng: 129.738, pt: 100, type: 'landmark', region: '九州・沖縄', pref: '長崎県' },
+            { name: "吉野ヶ里遺跡", lat: 33.327, lng: 130.386, pt: 40, type: 'landmark', region: '九州・沖縄', pref: '佐賀県' }
+        ];
+
+        spots.forEach(s => {
+            const icon = icons[s.type] || icons['landmark'];
+            L.marker([s.lat, s.lng], { icon: icon }).addTo(map).bindPopup(`<b>${s.name}</b><br>${s.pt} pt`);
+        });
+
+        let userMarker = L.circleMarker([0, 0], { color: '#fff', fillColor: '#007bff', fillOpacity: 1, weight: 3, radius: 8 }).addTo(map);
+
+        let checkedInSpots = JSON.parse(localStorage.getItem('myStamps')) || [];
+        let completedMissions = JSON.parse(localStorage.getItem('myMissions')) || [];
+
+        const missionDefinitions = [
+            { id: 'japan_all', category: 'national', title: "日本一周", desc: "全国全てのスポットを回る", bonus: 2000, filter: s => true },
+            { id: 'sankei', category: 'national', title: "日本三景", desc: "松島・天橋立・宮島のセット", bonus: 500, filter: s => s.tags?.includes('sankei') },
+            { id: 'meijo', category: 'national', title: "三名城", desc: "姫路・名古屋・熊本城のセット", bonus: 500, filter: s => s.tags?.includes('meijo') },
+            { id: 'meisen', category: 'national', title: "三名泉", desc: "有馬・草津・下呂温泉のセット", bonus: 500, filter: s => s.tags?.includes('meisen') },
+            { id: 'tohoku_all', category: 'tohoku', title: "東北制覇", desc: "東北の全スポットを制覇", bonus: 500, filter: s => s.region === '北海道・東北' },
+            { id: 'kanto_all', category: 'kanto', title: "関東制覇", desc: "関東の全スポットを制覇", bonus: 500, filter: s => s.region === '関東' },
+            { id: 'chubu_all', category: 'chubu', title: "中部制覇", desc: "中部の全スポットを制覇", bonus: 500, filter: s => s.region === '中部' },
+            { id: 'kinki_all', category: 'kinki', title: "近畿制覇", desc: "近畿全スポット制覇", bonus: 500, filter: s => s.region === '近畿' },
+            { id: 'chugoku_all', category: 'chugoku', title: "中四国制覇", desc: "中国・四国の全スポットを制覇", bonus: 500, filter: s => s.region === '中国・四国' },
+            { id: 'kyushu_all', category: 'kyushu', title: "九州沖縄制覇", desc: "九州・沖縄の全スポットを制覇", bonus: 500, filter: s => s.region === '九州・沖縄' }
+        ];
+
+        const missionCategories = [
+            { id: 'national', name: '👑 全国・共通ミッション' },
+            { id: 'tohoku', name: '❄️ 北海道・東北ミッション' },
+            { id: 'kanto', name: '🗼 関東ミッション' },
+            { id: 'chubu', name: '🏔️ 中部ミッション' },
+            { id: 'kinki', name: '🏯 近畿限定ミッション' },
+            { id: 'chugoku', name: '🍊 中国・四国ミッション' },
+            { id: 'kyushu', name: '🌴 九州・沖縄ミッション' }
+        ];
+
+        function isCheckedIn(n) { return checkedInSpots.some(s => s.name === n); }
+        function calculatePoints() {
+            const now = new Date(); let t = 0, m = 0;
+            checkedInSpots.forEach(s => { const spot = spots.find(x => x.name === s.name); if(spot){ t += spot.pt; if(new Date(s.date).getMonth() === now.getMonth()) m += spot.pt; } });
+            completedMissions.forEach(mi => { const def = missionDefinitions.find(x => x.id === mi.id); if(def){ t += def.bonus; if(new Date(mi.date).getMonth() === now.getMonth()) m += def.bonus; } });
+            return { total: t, month: m };
+        }
+
+        function updateStampBook() {
+            const container = document.getElementById('stamp-book-container');
+            container.innerHTML = '';
+            const scores = calculatePoints();
+            document.getElementById('score-total').innerText = scores.total;
+            document.getElementById('score-month').innerText = scores.month;
+            const regionOrder = ['北海道・東北', '関東', '中部', '近畿', '中国・四国', '九州・沖縄'];
+            regionOrder.forEach(region => {
+                const regionSpots = spots.filter(s => s.region === region);
+                if(regionSpots.length === 0) return;
+                const section = document.createElement('div'); section.className = 'region-section';
+                section.innerHTML = `<div class="region-title">${region}</div>`;
+                const prefs = [...new Set(regionSpots.map(s => s.pref))];
+                prefs.forEach(pref => {
+                    section.innerHTML += `<div class="pref-title">${pref}</div>`;
+                    const grid = document.createElement('div'); grid.className = 'stamp-grid';
+                    regionSpots.filter(s => s.pref === pref).forEach(spot => {
+                        const got = checkedInSpots.find(x => x.name === spot.name);
+                        const card = document.createElement('div'); card.className = `stamp-card ${got ? 'collected' : ''}`;
+                        card.innerHTML = `<img src="${icons[spot.type].options.iconUrl}" class="stamp-icon-img"><div class="stamp-name">${spot.name}</div>`;
+                        grid.appendChild(card);
+                    });
+                    section.appendChild(grid);
+                });
+                container.appendChild(section);
+            });
+            updateMissions();
+        }
+
+        function updateMissions() {
+            const container = document.getElementById('mission-container');
+            container.innerHTML = '';
+            missionCategories.forEach(cat => {
+                const filtered = missionDefinitions.filter(m => m.category === cat.id);
+                if(filtered.length === 0) return;
+                container.innerHTML += `<div class="mission-category-title">${cat.name}</div>`;
+                filtered.forEach(m => {
+                    const targets = spots.filter(m.filter);
+                    const gotCount = targets.filter(s => isCheckedIn(s.name)).length;
+                    const total = targets.length;
+                    const isDone = completedMissions.some(x => x.id === m.id);
+                    if(gotCount === total && !isDone && total > 0){
+                        completedMissions.push({ id: m.id, date: new Date().toISOString() });
+                        localStorage.setItem('myMissions', JSON.stringify(completedMissions));
+                        alert(`ミッション達成！: ${m.title}`); updateStampBook();
+                    }
+                    const percent = Math.floor((gotCount / total) * 100);
+                    const targetTagsHtml = targets.map(s => `<span class="target-tag ${isCheckedIn(s.name) ? 'done' : ''}">${isCheckedIn(s.name) ? '✅ ' : ''}${s.name}</span>`).join('');
+                    container.innerHTML += `
+                        <div class="mission-card ${isDone ? 'completed' : ''}">
+                            <div class="completed-stamp">CLEAR</div>
+                            <div class="mission-header"><span>${m.title}</span><span class="mission-bonus">+${m.bonus}pt</span></div>
+                            <div class="progress-container"><div class="progress-bar" style="width:${percent}%"></div></div>
+                            <div class="mission-targets">${targetTagsHtml}</div>
+                        </div>`;
+                });
+            });
+        }
+
+        async function saveScore(showAlert = true) {
+            const nickname = currentUser?.user_metadata?.nickname || "ゲスト", pts = calculatePoints();
+            const { error } = await supabaseClient.from('rankings').upsert({ nickname, total_points: pts.total, monthly_points: pts.month }, { onConflict: 'nickname' });
+            if(error) { if(showAlert) alert(error.message); } 
+            else { if(showAlert) alert("送信完了！"); fetchRanking(); }
+        }
+
+        async function fetchRanking() {
+            const col = currentRankingMode === 'total' ? 'total_points' : 'monthly_points';
+            const { data } = await supabaseClient.from('rankings').select('*').order(col, { ascending: false }).limit(20);
+            document.getElementById('ranking-body').innerHTML = (data || []).map((r, i) => {
+                const icon = i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}位`;
+                return `<tr><td>${icon}</td><td><b>${r.nickname}</b></td><td style="text-align:right;"><span class="rank-pt">${r[col]}</span></td></tr>`;
+            }).join('');
+        }
+
+        let currentRankingMode = 'total';
+        function switchRanking(m) { currentRankingMode = m; document.getElementById('tab-total').classList.toggle('active', m === 'total'); document.getElementById('tab-month').classList.toggle('active', m === 'month'); fetchRanking(); }
+
+        let currentPos = null, spotInRange = null, lastCheckTime = 0;
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition(p => {
+                const lat = p.coords.latitude, lng = p.coords.longitude; currentPos = { lat, lng }; userMarker.setLatLng([lat, lng]);
+                const now = Date.now();
+                if (now - lastCheckTime > 1500) {
+                    spotInRange = spots.find(s => {
+                        const R = 6371000, dL = (s.lat - lat) * Math.PI / 180, dG = (s.lng - lng) * Math.PI / 180;
+                        const a = Math.sin(dL/2)**2 + Math.cos(lat*Math.PI/180)*Math.cos(s.lat*Math.PI/180)*Math.sin(dG/2)**2;
+                        return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))) < 50 && !isCheckedIn(s.name);
+                    });
+                    document.getElementById('checkin-area').style.display = spotInRange ? 'block' : 'none';
+                    lastCheckTime = now;
+                }
+                document.getElementById('info').innerText = `現在地: ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+            }, null, { enableHighAccuracy: true });
+        }
+        function executeCheckIn() { if(!spotInRange) return; checkedInSpots.push({ name: spotInRange.name, date: new Date().toISOString() }); localStorage.setItem('myStamps', JSON.stringify(checkedInSpots)); alert(`ゲット: ${spotInRange.name}!`); updateStampBook(); }
+        function flyToCurrentLocation() { if(currentPos) map.flyTo([currentPos.lat, currentPos.lng], 15); }
+        function switchPage(p) {
+            document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+            document.getElementById(`page-${p}`).classList.add('active');
+            document.querySelectorAll('.nav-item').forEach((el, i) => el.classList.toggle('active', ['map','stamps','missions','ranking'][i] === p));
+            if (p === 'map') setTimeout(() => map.invalidateSize(), 100);
+            if (p === 'ranking') fetchRanking();
+        }
+    </script>
+</body>
+</html>
